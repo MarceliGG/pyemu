@@ -10,31 +10,46 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
+    QListWidgetItem,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
-from PySide6.QtCore import Qt, QRegularExpression
-from PySide6.QtGui import QRegularExpressionValidator
+from PySide6.QtCore import QSize, Qt, QRegularExpression
+from PySide6.QtGui import QIcon, QRegularExpressionValidator
 import tomllib
+from importlib import resources
+
+
+def get_icon(name): return resources.files("assets").joinpath(name)
 
 
 class MemoryEdit(QLineEdit):
     def __init__(self, default):
         super().__init__(default)
         regex = QRegularExpression(r"^\d{1,5}\s*[kKmMgG]?$")
-        regex.setPatternOptions(QRegularExpression.CaseInsensitiveOption)
         validator = QRegularExpressionValidator(regex)
         self.setValidator(validator)
 
 
-class Page(QWidget):
-    def __init__(self, data, name):
+class Device(QListWidgetItem):
+    def __init__(self, data: dict):
         super().__init__()
-        self.layout = QVBoxLayout(self)
-        tab_vm_label = QLabel()
-        tab_vm_label.setText(f"<h1>{name}</h1>")
-        self.layout.addWidget(tab_vm_label)
+        match data.get("type", "unknown"):
+            case "cdrom":
+                self.setText(f"cdrom ({data.get("path", "no path")})")
+                self.setIcon(QIcon(str(get_icon("cd.svg"))))
+            case _:
+                self.setText("Unknown or incorrect device type")
+                self.setIcon(QIcon(str(get_icon("unknonw.svg"))))
+
+
+class Page(QWidget):
+    def __init__(self, data, name, parent=None):
+        super().__init__(parent)
+        self.lo = QVBoxLayout(self)
+        tab_vm_label = QLabel(f"<h1>{name}</h1>")
+        self.lo.addWidget(tab_vm_label)
 
         form = QFormLayout()
 
@@ -47,18 +62,27 @@ class Page(QWidget):
         toggles.setLayout(toggles_layout)
 
         kvm_checkbox = QCheckBox("Enable KVM")
-        kvm_checkbox.setChecked(data["kvm"])
+        kvm_checkbox.setChecked(data.get("kvm", True))
         network_checkbox = QCheckBox("Enable Network")
-        network_checkbox.setChecked(data["network"])
+        network_checkbox.setChecked(data.get("network", True))
         toggles_layout.addWidget(kvm_checkbox)
         toggles_layout.addWidget(network_checkbox)
         toggles_layout.addStretch()
 
         form.addRow(toggles)
 
-        self.layout.addLayout(form)
+        self.lo.addLayout(form)
 
-        self.layout.addStretch()
+        devices = QListWidget()
+        devices.setSelectionMode(QListWidget.SelectionMode.NoSelection)
+        devices.setIconSize(QSize(48, 48))
+
+        for d in data.get("devices", []):
+            devices.addItem(Device(d))
+
+        self.lo.addWidget(devices)
+
+        self.lo.addStretch()
 
 
 class PyEmu(QWidget):
@@ -77,26 +101,25 @@ class PyEmu(QWidget):
         )
         self.vms_folder.mkdir(parents=True, exist_ok=True)
 
-        self.layout = QHBoxLayout(self)
+        self.lo = QHBoxLayout(self)
         self.stack = QStackedWidget()
 
         self.sidebar = QListWidget()
-        self.sidebar.setFixedWidth(200)
+        self.sidebar.setFixedWidth(150)
 
-        for file in self.vms_folder.glob("*.toml"):
+        for file in sorted(self.vms_folder.glob("*.toml")):
             if file.is_file():
                 # file_path = self.vms_folder / vm
                 with file.open("rb") as f:
                     data = tomllib.load(f)
                 self.sidebar.addItem(file.stem)
-                self.stack.addWidget(Page(data, file.name))
+                self.stack.addWidget(Page(data, file.name, self.stack))
 
         self.sidebar.currentRowChanged.connect(self.stack.setCurrentIndex)
-        # self.sidebar.layout.addStretch()
-        self.layout.addWidget(self.sidebar)
+        self.lo.addWidget(self.sidebar)
         self.sidebar.setCurrentRow(0)
 
-        self.layout.addWidget(self.stack)
+        self.lo.addWidget(self.stack)
 
 
 if __name__ == "__main__":
